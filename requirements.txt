@@ -8,3 +8,4 @@ datetime
 pandas
 numpy
 investpy
+gunicorn
