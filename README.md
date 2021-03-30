@@ -6,4 +6,5 @@ It consists of a Python dash web app, showing instant data from world's stock ma
 Data is obtained live from the Investing.com site.
 
 Main libraries used: Dash and Investpy
+
 Running app on https://wsmm.space
