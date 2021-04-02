@@ -125,8 +125,7 @@ app.layout = html.Div([
     ],style={"display":"flex","margin-bottom":"5px"}),
     html.Div([
         html.Label('Choose only one company to generate report:',style={"margin-right":"5px"}),
-        dcc.Dropdown(id='dropdownReport',placeholder="Select company", multi=False, style={"width":"60%"}),
-        html.P(id='tempLabel',children='No Company selected')],#,style={"visibility":"hidden"})],
+        dcc.Dropdown(id='dropdownReport',placeholder="Select company", multi=False, style={"width":"60%"})],
     style=dict(display='flex')),
     html.Br(),
     dcc.Tabs(id='tabs', value='tabStocks', persistence=False, children=[ 
