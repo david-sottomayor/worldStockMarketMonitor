@@ -11,6 +11,9 @@ import dash_table
 from dash.dependencies import Input, Output, State
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import plotly.express as px
+from dash.exceptions import PreventUpdate
+
 
 #Retrieve a list of countries with stocks listed on Investing.com
 countries = investpy.get_stock_countries()
@@ -34,7 +37,7 @@ def getStocks(country):
 
 #Define a function to retrieve historic data of chosen stock and by default from a scentury to date
 #Inputs: Symbol, Country, Period Span wit 'Y' or 'M' sufix
-def getStocksData(stock, country, span='100Y'):
+def getStocksData(stock, country, span='21Y'):
     if 'Y' in span:
         span = float(span.strip('Y'))
         fromDate = dt.date.today() - dt.timedelta(days=span*365.25)
@@ -61,15 +64,6 @@ def getProfile(stock,country):
         profile = ''
     return profile['desc']
 
-#Define a function to retrive a company summary
-def getSummary(stock,country):
-    try:
-        summary=investpy.stocks.get_stock_financial_summary(stock, country, summary_type='income_statement', period='annual')
-    except:
-        raise Exception(f"Couldn\'t get summary for {stock} in {country}")
-        summary = pd.Dataframe([])
-    return summary
-
 #Define a function to retrive stock's dividends
 def getDividends(stock,country):
     try:
@@ -80,29 +74,48 @@ def getDividends(stock,country):
     return dividends
 
 #Define a function to get the top five stocks from the selected country
-def getTop10(country):
+#Define a function to get the top five stocks from the selected country
+def getTop10(country,option):
     try:
-        top10=investpy.stocks.get_stocks_overview(country, as_json=False, n_results=1000)
-        top10=top10.sort_values('turnover', ascending=False).head(10)
-        top10.drop(['country','symbol','currency'],axis=1, inplace=True)
+        top10=investpy.stocks.get_stocks_overview(country, as_json=False)
+        top10.drop(['country','symbol'],axis=1, inplace=True)
         top10.rename(columns={"change_percentage":"change %"}, inplace=True)
+        top10.rename(columns={"change":"daily_change"}, inplace=True)
+        top10['change %'] = top10['change %'].str.replace("%","").astype(float)
+        top10['daily_change'] = top10['daily_change'].str.replace("+","").astype(float)
+        if option == "Higher price increase":
+            top10=top10.sort_values('change %', ascending=False).head(10)
+        elif option == 'Higher Turnover':
+            top10=top10.sort_values('turnover', ascending=False).head(10)
+        else:
+            top10=top10.sort_values('change %', ascending=True).head(10)
     except:
         raise Exception(f"Couldn\'t get top10 for {country}")
         top10 = pd.Dataframe([])
     return top10
+
+
+
 
 #Design App Layout
 app = dash.Dash(__name__, external_stylesheets =[dbc.themes.BOOTSTRAP], suppress_callback_exceptions=True)
 server = app.server
 
 app.layout = html.Div([
-    html.Div([html.H1('World Stock Market Monitor',style={"text-align":"center"}),
-             html.Hr(),
+    html.Div([
+        dbc.Navbar(
+            dbc.Row([dbc.Col(dbc.NavbarBrand('WORLD STOCK MARKET MONITOR', className="ml-2"),
+                style={"text-align":"center"}),],),
+            color="YellowGreen",
+            #font-size= 100px,
+            dark=True,
+            sticky="top",
+        ),
              html.Br()
     ]),
     html.Div([    
         html.Div([
-            html.Label('Choose a country to analyze stocks from:',style=dict(margin="10px")),
+            html.Label('Choose a country to analyze stocks from:',style=dict(margin="10px") ),
             dcc.Dropdown(options=[{'label': k.capitalize(), 'value': k} for k in countries],placeholder="Select country",
                          id='dropdownCountries', style=dict(width="60%",verticalAlign="middle"))],
         style=dict(display='flex',width="50%")),
@@ -113,7 +126,7 @@ app.layout = html.Div([
         html.Div([
                 html.Div([
                     html.Label('Select Initial Date:', style=dict(margin="10px")),
-                    dcc.DatePickerSingle(date=dt.datetime.today() - dt.timedelta(days=36525),
+                    dcc.DatePickerSingle(date=dt.datetime.today() - dt.timedelta(days=21*365.25),
                     display_format='Y-MM-DD',
                     id='initialdate', style=dict(width="50%",verticalAlign="middle"))], style=dict(display='flex',width="40%")),         
                 html.Div([
@@ -130,37 +143,48 @@ app.layout = html.Div([
     html.Br(),
     dcc.Tabs(id='tabs', value='tabStocks', persistence=False, children=[ 
         dcc.Tab(label='Stocks', value='tabStocks', children=
-            html.Div([    
-                html.Div([
-                    html.H4('Top 10 performing stocks in the selected country', style={"width": "40%"}),
-                    html.H4('Plot of selected stock(s)', style={"width": "60%"})],
-                style=dict(display='flex')),    
+            html.Div([
+                html.Br([]),
                 html.Div([
                     html.Div([
-                        html.Div(id='top10Desc', 
-                                children='This are the 10 stocks currently offering a higher turnover for the selected country\n\n\n',),
-                        html.Div(id='table', style={"width": "30%","margin-top":"50px"}),
-                    ], style={"width": "40%"}),
-                    html.Div(id='margin', style={"width": "10%"}),
-                    html.Div(id="g1Container", style={"height": "70%", "width": "100%"},children=dcc.Graph(id='graphic')),
-                ],className='box',style=dict(display='flex'))    
+                    dbc.CardHeader(html.H4('Top 10 performing stocks in the selected country'),),
+                    dbc.CardBody(
+                        children =[
+                        dcc.RadioItems(id='option',
+                                       options=[{'label': 'Higher Turnover', 'value': 'Higher Turnover'},
+                                                {'label': 'Higher price increase', 'value': 'Higher price increase'},
+                                                {'label': 'Higher price drop', 'value': 'Higher price drop'}],
+                                       value='Higher Turnover', labelStyle={'display': 'inline-block', "width": "33%"}),
+                        html.Div(id='table', style={"width": "30%", "margin-top": "50px"}),
+                        dcc.Graph(id='bar_plot', style={"height": "50%", "width": "100%"})])
+                    ],style={"width": "45%"} ),
+                    html.Div(id='margin', style={"width": "5%"}),
+                    html.Div([
+                        dbc.CardHeader(html.H4('Plot of selected stock(s)')),
+                        html.Div(dcc.Graph(id='graphic'), style={"height": "44%", "width": "95%"}),
+                        html.Div(dcc.Graph(id='compbarplot'),style={"height": "40%", "width": "95%"})],style={"width": "100%"})
+                ],style=dict(display='flex'))
             ])    
         ),
         dcc.Tab(label='Report', value='tabReport',children=[
+            html.Br([]),
             html.H4(f'Company Report',style={"text-align":"center"}),
-            html.H4('Profile'),
-            html.Div(id='profile'),
-            html.H4('Summary'),
-            html.Div(id='summary'),
+            html.Hr([]),
+            html.Div([
+                html.H4('Profile'),
+                html.Div(id='profile'),
+            ],className="profile"),
+            dbc.CardHeader(html.H4('Dividends')),
             html.Div([
                 html.Div([
-                    html.H4('Dividends'),
-                    html.Div(id='dividends')
+                html.Br([]),
+                html.Br([]),
+                html.Div(id='dividends')
                 ],style={"width":"38%"}),
                 html.Div(style={"width":"2%"}),
                 html.Div(dcc.Graph(id='divGraph'),style={"width":"60%"})       
             ],style=dict(display="flex",width="100%")),
-            html.H4('Stock Prices'),
+            dbc.CardHeader(html.H4('Candlestick Plot')),
             html.Div(dcc.Graph(id='candle'))]
         )]),
     html.Footer(id='footer',children=[
@@ -210,12 +234,39 @@ def setStocks(selectedStocks: list, selectedLabels: list)->list:
 
 #Update data of top10 stocks
 @app.callback(Output('table','children'),
-            [Input('dropdownCountries', 'value')])
-def updateTable(selectedCountry):
-    df=getTop10(selectedCountry)
+            [Input('dropdownCountries', 'value'),
+             Input('option', 'value')])
+def updateTable(selectedCountry,option):
+    df=getTop10(selectedCountry,option)
+    df['turnover'] = df['turnover'].map('{:,}'.format)
+    df['last'] = df['last'].map('{:,.2f}'.format)
+    df['low'] = df['low'].map('{:,.2f}'.format)
+    df['high'] = df['high'].map('{:,.2f}'.format)
+    df['change %'] = df['change %'].map('{:,.2f}'.format)
+    df['daily_change'] = df['daily_change'].map('{:,.2f}'.format)
     data = df.to_dict('rows')
     columns =  [{"name": i, "id": i,} for i in (df.columns)]
     return dash_table.DataTable(data=data, columns=columns)
+
+#Plot Bar top 10
+@app.callback(Output('bar_plot', 'figure'),
+            [Input('dropdownCountries', 'value'),
+             Input('option', 'value')])
+def update_barplot(selectedCountry, option):
+    if option == "Higher price increase":
+        fig = px.bar(getTop10(selectedCountry,option),y='change %',x='name',color_discrete_sequence=["YellowGreen"],
+                     template='plotly_white')
+    elif option == "Higher price drop":
+        fig = px.bar(getTop10(selectedCountry,option),y='change %',x='name',color_discrete_sequence=["YellowGreen"],
+                     template='plotly_white')
+    elif option == "Higher Turnover":
+        fig = px.bar(getTop10(selectedCountry,option),y='turnover',x='name',color_discrete_sequence=["YellowGreen"],
+                     template='plotly_white')
+    else:
+        fig = px.bar(getTop10(country,option),y='change %',x='name',color_discrete_sequence=["YellowGreen"],
+                     template='plotly_white')
+    fig.update_layout(title={'text' : f'{option} by Company','x': 0.5}, xaxis_title="Company",)
+    return fig
 
 #Plot graphic
 @app.callback(
@@ -248,6 +299,47 @@ def updateGraph(selectedCountry, selectedStocks,initialdate, finaldate):
         fig = go.Figure(data=res, layout = layout) 
     return fig
 
+#barplot comparison of 2 stocks
+
+@app.callback(
+    Output("compbarplot", "figure"),
+    [Input('dropdownCountries', 'value'),
+     Input('dropdownStocks', 'value')]
+)
+def comp_bigram_comparisons(selectedCountry, selectedStocks):
+    if not selectedStocks:
+        return {}
+    else:
+        df1 = getStocksData(selectedStocks[0], selectedCountry)
+        df2 = getStocksData(selectedStocks[1], selectedCountry)
+        df1 = df1[df1["date"] == df1.iloc[-1, 0]]
+        df2 = df2[df2["date"] == df2.iloc[-1, 0]]
+        df1.reset_index(inplace=True)
+        df2.reset_index(inplace=True)
+        df1.drop(['volume','currency', "date", "index"], axis='columns', inplace=True)
+        df2.drop(['volume', 'currency', "date", "index"], axis='columns', inplace=True)
+        df1 = df1.T
+        df2 = df2.T
+        df1["Stock"] = selectedStocks[0]
+        df2["Stock"] = selectedStocks[1]
+        df_final = df1.append(df2)
+        df_final = df_final.rename(columns={0 :'Price'})
+    fig = px.bar(
+        df_final,
+        title="Prices comparison of Stocks:",
+        x=df_final.index,
+        y="Price",
+        color="Stock",
+        template="plotly_white",
+        color_discrete_sequence=["YellowGreen", "LightGrey"],
+        labels={"Stock": "Company", "index": "Indicators"},
+        hover_data="",
+    )
+    fig.update_layout(legend=dict(x=0.1, y=1.1), legend_orientation="h")
+    fig.update_yaxes(title="", showticklabels=False)
+    fig.data[0]["hovertemplate"] = fig.data[0]["hovertemplate"][:-14]
+    return fig
+
 #Display Profile
 @app.callback( 
     Output('profile', 'children'),
@@ -260,22 +352,6 @@ def showProfile(selectedCountry, selectedStock):
     except:
         profile='No profile encountered'
     return profile
-
-#Display Summary
-@app.callback( 
-    Output('summary', 'children'),
-    [Input('dropdownCountries', 'value'),
-     Input('dropdownReport', 'value'),
-    ])
-def showSummary(selectedCountry, selectedStock):
-    try:
-        dfS=getSummary(selectedStock, selectedCountry).head(1)
-    except:
-        dfS=pd.Dataframe([])
-    dataS = dfS.to_dict('rows')
-    columnsS =  [{"name": i, "id": i,} for i in (dfS.columns)]
-    tableS = dash_table.DataTable(data=dataS, columns=columnsS)
-    return tableS
 
 #Display Dividends
 @app.callback( 
@@ -305,8 +381,8 @@ def showDividends(selectedCountry, selectedStock, initialdate, finaldate):
     fig.update_yaxes(title_text="Dividend", title_font_size=16, tickfont_size=16, secondary_y=False)
     fig.update_yaxes(title_text="Yield (%)", title_font_size=16, tickfont_size=16, secondary_y=True)
     # Add traces
-    fig.add_trace(go.Scatter(x=dfDivFilter['Payment Date'], y=dfDivFilter['Dividend'], name="Dividend"),secondary_y=False)
-    fig.add_trace(go.Scatter(x=dfDivFilter['Payment Date'], y=dfDivFilter['Yield'], name="Yield"),secondary_y=True)
+    fig.add_trace(go.Scatter(x=dfDivFilter['Payment Date'], y=dfDivFilter['Dividend'], name="Dividend", marker=dict(color="YellowGreen")),secondary_y=False)
+    fig.add_trace(go.Scatter(x=dfDivFilter['Payment Date'], y=dfDivFilter['Yield'], name="Yield", marker=dict(color="DarkGray")),secondary_y=True)
     return tableDiv , fig
 
 
@@ -329,7 +405,7 @@ def display_candlestick(selectedCountry, selectedStocks, initialdate, finaldate)
                 open=df_filtered_date['open'],
                 high=df_filtered_date['high'],
                 low=df_filtered_date['low'],
-                close=df_filtered_date['close'])]
+                close=df_filtered_date['close'],increasing_line_color='YellowGreen')]
         layout = dict(
                   title=dict(text= f'{selectedStocks}'),
                   xaxis=dict(title='Dates'),
